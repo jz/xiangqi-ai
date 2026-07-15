@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>中国象棋 · 对弈 Fairy-Stockfish NNUE</title>
+<style>
+  :root {
+    --bg: #211a13;
+    --panel: #2b2218;
+    --panel-edge: #3d3122;
+    --ink: #f0e6d6;
+    --muted: #a08d72;
+    --accent: #c0392b;
+    --wood-hi: #d8a95f;
+    --wood-lo: #c08a45;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    background: radial-gradient(900px 500px at 50% -10%, #2c2318 0%, var(--bg) 65%);
+    color: var(--ink);
+    font-family: "Songti SC", "Noto Serif SC", "SimSun", serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 22px 16px 30px;
+  }
+  header { text-align: center; margin-bottom: 18px; }
+  h1 {
+    font-size: clamp(22px, 4vw, 32px);
+    font-weight: 700;
+    letter-spacing: 0.4em;
+    margin-left: 0.4em;
+  }
+  h1 .dot { color: var(--accent); }
+  .tagline {
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.28em;
+    margin-top: 8px;
+  }
+  .layout {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .boardcard {
+    background: linear-gradient(135deg, var(--wood-hi), var(--wood-lo));
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  canvas#board {
+    display: block;
+    width: min(520px, 92vw);
+    height: auto;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  aside {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 8px;
+    padding: 20px;
+    width: 250px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    font-family: ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .label {
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+  .status {
+    font-size: 16px;
+    font-weight: 600;
+    min-height: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .status .pulse {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.1s ease-in-out infinite;
+    flex: none;
+  }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .status .pulse { animation: none; } }
+  select, button {
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: #241d14;
+    border: 1px solid var(--panel-edge);
+    border-radius: 5px;
+    padding: 8px 12px;
+    width: 100%;
+    cursor: pointer;
+  }
+  select:hover, button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: #d24435; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--wood-hi); outline-offset: 2px; }
+  .row2 { display: flex; gap: 10px; }
+  .movelist {
+    height: 110px;
+    overflow-y: auto;
+    background: #241d14;
+    border: 1px solid var(--panel-edge);
+    border-radius: 5px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.9;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .movelist b { color: var(--ink); font-weight: 600; }
+  .engine-info {
+    border-top: 1px solid var(--panel-edge);
+    padding-top: 11px;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    word-break: break-all;
+  }
+  .engine-info .ename { color: var(--wood-hi); font-weight: 700; }
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(20, 15, 9, 0.82);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  .overlay.hidden { display: none; }
+  .overlay .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    padding: 36px 48px;
+    text-align: center;
+    max-width: 380px;
+  }
+  .overlay .big {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    margin: 0 0 12px 0.3em;
+  }
+  .overlay .sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 24px;
+    font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>中国象棋<span class="dot">・</span>NNUE</h1>
+  <div class="tagline">对弈 Fairy-Stockfish 神经网络引擎</div>
+</header>
+
+<div class="layout">
+  <div class="boardcard">
+    <canvas id="board" width="520" height="576"></canvas>
+  </div>
+  <aside>
+    <div>
+      <div class="label">对局状态</div>
+      <div class="status" id="status"><span class="pulse"></span>正在加载引擎与模型…</div>
+    </div>
+    <div>
+      <div class="label">执子</div>
+      <select id="side">
+        <option value="r" selected>我执红（先手）</option>
+        <option value="b">我执黑（后手）</option>
+      </select>
+    </div>
+    <div>
+      <div class="label">难度</div>
+      <select id="level">
+        <option value="easy">初学 · 走子快且常出漏着</option>
+        <option value="medium" selected>业余 · 有一定攻防</option>
+        <option value="hard">高手 · 全力 1 秒</option>
+        <option value="master">大师 · 全力 5 秒</option>
+      </select>
+    </div>
+    <div class="row2">
+      <button id="undoBtn" type="button" disabled>悔棋</button>
+      <button id="restartBtn" class="primary" type="button">重新开始</button>
+    </div>
+    <div>
+      <div class="label">着法（WXF 记谱）</div>
+      <div class="movelist" id="movelist">—</div>
+    </div>
+    <div class="engine-info">
+      <div class="ename" id="engineName">Fairy-Stockfish WASM</div>
+      <div id="engineMsg">NNUE: xiangqi-c07e94a5c7cb（+914 Elo）</div>
+    </div>
+  </aside>
+</div>
+
+<div class="overlay hidden" id="overlay">
+  <div class="card">
+    <p class="big" id="overlayTitle"></p>
+    <p class="sub" id="overlaySub"></p>
+    <button class="primary" id="againBtn" type="button">再来一局</button>
+  </div>
+</div>
+
+<script src="coi-serviceworker.min.js"></script>
+<script src="lib/stockfish.js"></script>
+<script type="module">
+import Module from "./lib/ffish.js";
+
+(async () => {
+  "use strict";
+
+  const statusEl = document.getElementById("status");
+  const engineNameEl = document.getElementById("engineName");
+  const engineMsgEl = document.getElementById("engineMsg");
+  const movelistEl = document.getElementById("movelist");
+  const undoBtn = document.getElementById("undoBtn");
+  const overlay = document.getElementById("overlay");
+  const overlayTitle = document.getElementById("overlayTitle");
+  const overlaySub = document.getElementById("overlaySub");
+
+  function setStatus(text, busy) {
+    statusEl.innerHTML = busy ? '<span class="pulse"></span>' + text : text;
+  }
+
+  if (!window.crossOriginIsolated) {
+    // 线上部署时 coi-serviceworker 注册后会自动刷新一次进入隔离状态
+    setStatus("正在启用跨源隔离…", true);
+    engineMsgEl.textContent =
+      "若长时间停留此状态：本地请通过 python3 serve.py 访问；" +
+      "线上请确认浏览器支持 Service Worker（需 HTTPS）。";
+    return;
+  }
+
+  // ---------- 加载规则库与引擎 ----------
+  // ES6 导入时 document.currentScript 为 null，必须显式告知 wasm 路径
+  const ffish = await Module({ locateFile: (f) => "lib/" + f });
+  const Notation = ffish.Notation;
+
+  const sf = await Stockfish();
+  let onBestmove = null;
+  let lastInfo = "";
+  sf.addMessageListener((line) => {
+    if (line.startsWith("info ") && line.includes(" pv ")) lastInfo = line;
+    const m = /^bestmove (\S+)/.exec(line);
+    if (m && onBestmove) { const cb = onBestmove; onBestmove = null; cb(m[1]); }
+  });
+
+  setStatus("正在加载 NNUE 模型…", true);
+  const nnueResp = await fetch("lib/xiangqi.nnue");
+  const nnueData = new Uint8Array(await nnueResp.arrayBuffer());
+  sf.FS.writeFile("/xiangqi.nnue", nnueData);
+  sf.postMessage("uci");
+  sf.postMessage("setoption name UCI_Variant value xiangqi");
+  sf.postMessage("setoption name EvalFile value /xiangqi.nnue");
+  sf.postMessage("setoption name Use NNUE value true");
+  sf.postMessage("setoption name Hash value 64");
+
+  // ---------- 对局状态 ----------
+  const LEVELS = {
+    easy:   { skill: -8, movetime: 300 },
+    medium: { skill: 4,  movetime: 500 },
+    hard:   { skill: 20, movetime: 1000 },
+    master: { skill: 20, movetime: 5000 }
+  };
+  const CHARS = {
+    K: "帥", A: "仕", B: "相", N: "傌", R: "俥", C: "炮", P: "兵",
+    k: "將", a: "士", b: "象", n: "馬", r: "車", c: "砲", p: "卒"
+  };
+
+  let board = new ffish.Board("xiangqi");
+  let moves = [];       // UCI 着法
+  let sans = [];        // WXF 记谱
+  let humanRed = true;  // 人执红？
+  let flipped = false;  // 黑方视角
+  let selected = null;  // 选中的起点格 "b3"
+  let targets = [];     // 选中子的合法落点
+  let lastMove = null;  // {from, to}
+  let gameOver = false;
+  let thinking = false;
+
+  const humanTurn = () => board.turn() === humanRed;
+
+  // ---------- 棋盘渲染 ----------
+  const canvas = document.getElementById("board");
+  const W = 520, H = 576, GAP = 54;
+  const MX = (W - GAP * 8) / 2, MY = (H - GAP * 9) / 2;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  // 格子名 "a1".."i10"；file 0-8, rank 1-10
+  const sqName = (f, r) => "abcdefghi"[f] + r;
+  const px = (f) => MX + (flipped ? 8 - f : f) * GAP;
+  const py = (r) => MY + (flipped ? r - 1 : 10 - r) * GAP;
+
+  function parseSq(s) {
+    return { f: s.charCodeAt(0) - 97, r: parseInt(s.slice(1), 10) };
+  }
+
+  function gridFromFen(fen) {
+    const grid = {};
+    const rows = fen.split(" ")[0].split("/");
+    for (let i = 0; i < 10; i++) {
+      const rank = 10 - i;
+      let f = 0;
+      for (const ch of rows[i]) {
+        if (ch >= "1" && ch <= "9") f += parseInt(ch, 10);
+        else grid[sqName(f++, rank)] = ch;
+      }
+    }
+    return grid;
+  }
+
+  function line(x1, y1, x2, y2) {
+    ctx.beginPath();
+    ctx.moveTo(x1 + 0.5, y1 + 0.5);
+    ctx.lineTo(x2 + 0.5, y2 + 0.5);
+    ctx.stroke();
+  }
+
+  function drawBoardBase() {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, "#dcae66");
+    g.addColorStop(1, "#c48c46");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = "rgba(74, 50, 22, 0.8)";
+    ctx.lineWidth = 1;
+    const L = MX, R2 = MX + GAP * 8, T = MY, B2 = MY + GAP * 9;
+    const yTop5 = MY + GAP * 4, yBot6 = MY + GAP * 5; // 河界两岸
+
+    // 横线 10 条
+    for (let i = 0; i <= 9; i++) line(L, MY + i * GAP, R2, MY + i * GAP);
+    // 纵线：两边全长，中间的被河界截断
+    for (let i = 0; i <= 8; i++) {
+      const x = MX + i * GAP;
+      if (i === 0 || i === 8) line(x, T, x, B2);
+      else { line(x, T, x, yTop5); line(x, yBot6, x, B2); }
+    }
+    // 外框加重
+    ctx.lineWidth = 2;
+    ctx.strokeRect(L - 4.5, T - 4.5, GAP * 8 + 9, GAP * 9 + 9);
+    ctx.lineWidth = 1;
+
+    // 九宫斜线（上下各一）
+    line(MX + GAP * 3, T, MX + GAP * 5, T + GAP * 2);
+    line(MX + GAP * 5, T, MX + GAP * 3, T + GAP * 2);
+    line(MX + GAP * 3, B2, MX + GAP * 5, B2 - GAP * 2);
+    line(MX + GAP * 5, B2, MX + GAP * 3, B2 - GAP * 2);
+
+    // 炮位、兵卒位角标
+    const mark = (f, r) => {
+      const x = MX + f * GAP, y = MY + (10 - r) * GAP, d = 4, m = 8;
+      ctx.beginPath();
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        if ((f === 0 && sx < 0) || (f === 8 && sx > 0)) continue;
+        ctx.moveTo(x + sx * d, y + sy * (d + m) - sy * m + sy * m); // 角标竖段
+        ctx.moveTo(x + sx * d, y + sy * (d + m));
+        ctx.lineTo(x + sx * d, y + sy * d);
+        ctx.lineTo(x + sx * (d + m), y + sy * d);
+      }
+      ctx.stroke();
+    };
+    for (const [f, r] of [[1, 3], [7, 3], [1, 8], [7, 8]]) mark(f, r);
+    for (const f of [0, 2, 4, 6, 8]) { mark(f, 4); mark(f, 7); }
+
+    // 楚河汉界
+    ctx.fillStyle = "rgba(74, 50, 22, 0.65)";
+    ctx.font = '600 26px "Kaiti SC", "STKaiti", "KaiTi", serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const midY = (yTop5 + yBot6) / 2;
+    ctx.fillText("楚 河", MX + GAP * 2, midY);
+    ctx.fillText("漢 界", MX + GAP * 6, midY);
+  }
+
+  function drawPiece(sq, letter, alpha) {
+    const { f, r } = parseSq(sq);
+    const x = px(f), y = py(r), rad = GAP * 0.45;
+    const red = letter === letter.toUpperCase();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 2;
+    const g = ctx.createRadialGradient(x - rad * 0.3, y - rad * 0.3, rad * 0.2, x, y, rad);
+    g.addColorStop(0, "#faf0da");
+    g.addColorStop(1, "#e3cda3");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, rad, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    const col = red ? "#b03426" : "#33291c";
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, rad - 3.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = '700 27px "Kaiti SC", "STKaiti", "KaiTi", serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(CHARS[letter], x, y + 1);
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBoardBase();
+    const grid = gridFromFen(board.fen());
+
+    if (lastMove) {
+      for (const s of [lastMove.from, lastMove.to]) {
+        const { f, r } = parseSq(s);
+        ctx.strokeStyle = "rgba(192, 57, 43, 0.85)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px(f) - GAP * 0.42, py(r) - GAP * 0.42, GAP * 0.84, GAP * 0.84);
+      }
+    }
+    for (const [sq, letter] of Object.entries(grid)) drawPiece(sq, letter, 1);
+
+    if (selected) {
+      const { f, r } = parseSq(selected);
+      ctx.strokeStyle = "#2e7d4f";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(px(f), py(r), GAP * 0.48, 0, Math.PI * 2);
+      ctx.stroke();
+      for (const t of targets) {
+        const q = parseSq(t);
+        ctx.fillStyle = "rgba(46, 125, 79, 0.85)";
+        if (grid[t]) {
+          ctx.strokeStyle = "rgba(46, 125, 79, 0.9)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(px(q.f), py(q.r), GAP * 0.46, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(px(q.f), py(q.r), 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // ---------- 对局流程 ----------
+  function legalFrom(sq) {
+    const re = /(^[a-i](?:10|[1-9]))([a-i](?:10|[1-9]))$/;
+    return board.legalMoves().split(" ").filter(Boolean)
+      .map(mv => re.exec(mv))
+      .filter(m => m && m[1] === sq)
+      .map(m => m[2]);
+  }
+
+  function updateMovelist() {
+    if (sans.length === 0) { movelistEl.textContent = "—"; return; }
+    let html = "";
+    for (let i = 0; i < sans.length; i += 2) {
+      html += `<b>${i / 2 + 1}.</b> ${sans[i]}${sans[i + 1] ? "  " + sans[i + 1] : ""}<br>`;
+    }
+    movelistEl.innerHTML = html;
+    movelistEl.scrollTop = movelistEl.scrollHeight;
+  }
+
+  function pushMove(uci) {
+    sans.push(board.sanMove(uci, Notation.XIANGQI_WXF));
+    board.push(uci);
+    moves.push(uci);
+    const re = /^([a-i](?:10|[1-9]))([a-i](?:10|[1-9]))$/.exec(uci);
+    lastMove = { from: re[1], to: re[2] };
+    updateMovelist();
+  }
+
+  function checkGameEnd() {
+    if (!board.isGameOver()) return false;
+    gameOver = true;
+    const result = board.result(); // "1-0" 红胜 / "0-1" 黑胜 / "1/2-1/2"
+    let title, sub;
+    if (result === "1/2-1/2") {
+      title = "平局";
+      sub = "双方握手言和。";
+    } else {
+      const redWon = result === "1-0";
+      const humanWon = redWon === humanRed;
+      title = humanWon ? "你赢了" : "引擎获胜";
+      sub = humanWon ? "漂亮！你击败了 NNUE 引擎。" : "再接再厉，试试悔棋复盘或调低难度。";
+    }
+    setStatus(title, false);
+    overlayTitle.textContent = title;
+    overlaySub.textContent = sub;
+    setTimeout(() => overlay.classList.remove("hidden"), 500);
+    return true;
+  }
+
+  function statusForHuman() {
+    setStatus(board.isCheck() ? "将军！轮到你应将" : "轮到你落子", false);
+  }
+
+  function engineTurn() {
+    thinking = true;
+    selected = null; targets = [];
+    undoBtn.disabled = true;
+    setStatus("引擎思考中…", true);
+    const lv = LEVELS[document.getElementById("level").value];
+    sf.postMessage(`setoption name Skill Level value ${lv.skill}`);
+    sf.postMessage("position startpos" + (moves.length ? " moves " + moves.join(" ") : ""));
+    onBestmove = (mv) => {
+      thinking = false;
+      if (gameOver) return;
+      pushMove(mv);
+      const im = /depth (\d+) .*score (cp|mate) (-?\d+)/.exec(lastInfo);
+      if (im) {
+        const sc = im[2] === "mate" ? `杀棋 ${im[3]} 步` : `评分 ${im[3]}`;
+        engineMsgEl.textContent = `深度 ${im[1]} · ${sc}（引擎视角）`;
+      }
+      draw();
+      if (!checkGameEnd()) {
+        statusForHuman();
+        undoBtn.disabled = moves.length < 2;
+      }
+    };
+    sf.postMessage(`go movetime ${lv.movetime}`);
+  }
+
+  canvas.addEventListener("click", (e) => {
+    if (gameOver || thinking || !humanTurn()) return;
+    const rect = canvas.getBoundingClientRect();
+    const scale = W / rect.width;
+    const mx = (e.clientX - rect.left) * scale;
+    const my = (e.clientY - rect.top) * scale;
+    let f = Math.round((mx - MX) / GAP), ri = Math.round((my - MY) / GAP);
+    if (f < 0 || f > 8 || ri < 0 || ri > 9) return;
+    if (Math.abs(MX + f * GAP - mx) > GAP * 0.45 || Math.abs(MY + ri * GAP - my) > GAP * 0.45) return;
+    if (flipped) { f = 8 - f; }
+    const r = flipped ? ri + 1 : 10 - ri;
+    const sq = sqName(f, r);
+
+    if (selected && targets.includes(sq)) {
+      pushMove(selected + sq);
+      selected = null; targets = [];
+      draw();
+      if (!checkGameEnd()) engineTurn();
+      return;
+    }
+    const grid = gridFromFen(board.fen());
+    const letter = grid[sq];
+    const mine = letter && (letter === letter.toUpperCase()) === humanRed;
+    if (mine) {
+      selected = sq;
+      targets = legalFrom(sq);
+    } else {
+      selected = null; targets = [];
+    }
+    draw();
+  });
+
+  undoBtn.addEventListener("click", () => {
+    if (gameOver || thinking || moves.length < 2) return;
+    for (let i = 0; i < 2; i++) { board.pop(); moves.pop(); sans.pop(); }
+    const re = moves.length
+      ? /^([a-i](?:10|[1-9]))([a-i](?:10|[1-9]))$/.exec(moves[moves.length - 1]) : null;
+    lastMove = re ? { from: re[1], to: re[2] } : null;
+    selected = null; targets = [];
+    undoBtn.disabled = moves.length < 2;
+    updateMovelist();
+    statusForHuman();
+    draw();
+  });
+
+  function restart() {
+    onBestmove = null; // 丢弃思考中的旧回调，避免污染新对局
+    board.delete();
+    board = new ffish.Board("xiangqi");
+    moves = []; sans = [];
+    selected = null; targets = []; lastMove = null;
+    gameOver = false; thinking = false;
+    humanRed = document.getElementById("side").value === "r";
+    flipped = !humanRed;
+    overlay.classList.add("hidden");
+    undoBtn.disabled = true;
+    updateMovelist();
+    draw();
+    if (!humanTurn()) engineTurn();
+    else statusForHuman();
+  }
+
+  document.getElementById("restartBtn").addEventListener("click", restart);
+  document.getElementById("againBtn").addEventListener("click", restart);
+  document.getElementById("side").addEventListener("change", restart);
+
+  engineNameEl.textContent = "Fairy-Stockfish WASM · NNUE";
+  restart();
+})();
+</script>
+</body>
+</html>
