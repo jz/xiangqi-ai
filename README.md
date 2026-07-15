@@ -1,5 +1,7 @@
 # 中国象棋 · 人机对弈（Fairy-Stockfish WASM + NNUE）
 
+**线上版:** https://jz.github.io/xiangqi-ai/ （GitHub Pages + coi-serviceworker 注入 COOP/COEP）
+
 引擎在**浏览器里**运行——纯静态页面，无后端。
 
 - 引擎：[fairy-stockfish-nnue.wasm](https://github.com/fairy-stockfish/fairy-stockfish.wasm)（多线程 WASM 构建）
