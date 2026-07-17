@@ -94,7 +94,7 @@
   }
   @keyframes pulse { 50% { opacity: 0.25; } }
   @media (prefers-reduced-motion: reduce) { .status .pulse { animation: none; } }
-  select, button {
+  select, button, textarea {
     font: inherit;
     font-size: 14px;
     color: var(--ink);
@@ -106,6 +106,31 @@
     cursor: pointer;
   }
   select:hover, button:hover { border-color: var(--muted); }
+  textarea {
+    cursor: text;
+    resize: vertical;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  textarea:focus-visible { outline: 2px solid var(--wood-hi); outline-offset: 2px; }
+  .palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+  .palette button {
+    width: 32px; height: 32px; padding: 0; flex: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #faf0da, #e3cda3);
+    border-color: #8a6d43;
+    font-family: "Kaiti SC", "STKaiti", "KaiTi", serif;
+    font-size: 17px; font-weight: 700; line-height: 1;
+  }
+  .palette button.rd { color: #b03426; }
+  .palette button.blk { color: #33291c; }
+  .palette button.erase {
+    background: #241d14; color: var(--muted);
+    border-color: var(--panel-edge);
+    font-family: inherit; font-size: 12px;
+  }
+  .palette button.sel { outline: 2px solid #2e7d4f; outline-offset: 2px; }
   button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
   button.primary:hover { background: #d24435; }
   button:disabled { opacity: 0.45; cursor: default; }
@@ -161,6 +186,23 @@
     margin: 0 0 24px;
     font-family: ui-sans-serif, system-ui, "PingFang SC", sans-serif;
   }
+  .overlay .card.import {
+    text-align: left;
+    width: min(460px, 94vw);
+    max-width: none;
+    padding: 28px 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font-family: ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .card.import .big { text-align: center; margin-bottom: 0; }
+  .err {
+    color: #e07b6d;
+    font-size: 12px;
+    min-height: 16px;
+    line-height: 16px;
+  }
 </style>
 </head>
 <body>
@@ -179,25 +221,54 @@
       <div class="label">对局状态</div>
       <div class="status" id="status"><span class="pulse"></span>正在加载引擎与模型…</div>
     </div>
-    <div>
-      <div class="label">执子</div>
-      <select id="side">
-        <option value="r" selected>我执红（先手）</option>
-        <option value="b">我执黑（后手）</option>
-      </select>
+    <div id="playPanel" style="display:contents">
+      <div>
+        <div class="label">执子</div>
+        <select id="side">
+          <option value="r" selected>我执红（先手）</option>
+          <option value="b">我执黑（后手）</option>
+        </select>
+      </div>
+      <div>
+        <div class="label">难度</div>
+        <select id="level">
+          <option value="easy">初学 · 走子快且常出漏着</option>
+          <option value="medium" selected>业余 · 有一定攻防</option>
+          <option value="hard">高手 · 全力 1 秒</option>
+          <option value="master">大师 · 全力 5 秒</option>
+        </select>
+      </div>
+      <div class="row2">
+        <button id="undoBtn" type="button" disabled>悔棋</button>
+        <button id="restartBtn" class="primary" type="button">重新开始</button>
+      </div>
+      <div class="row2">
+        <button id="importBtn" type="button">导入局面</button>
+        <button id="setupBtn" type="button">摆棋</button>
+      </div>
     </div>
-    <div>
-      <div class="label">难度</div>
-      <select id="level">
-        <option value="easy">初学 · 走子快且常出漏着</option>
-        <option value="medium" selected>业余 · 有一定攻防</option>
-        <option value="hard">高手 · 全力 1 秒</option>
-        <option value="master">大师 · 全力 5 秒</option>
-      </select>
-    </div>
-    <div class="row2">
-      <button id="undoBtn" type="button" disabled>悔棋</button>
-      <button id="restartBtn" class="primary" type="button">重新开始</button>
+    <div id="setupPanel" style="display:none; flex-direction:column; gap:15px;">
+      <div>
+        <div class="label">选子后点击棋盘放置 · 再点同点移除</div>
+        <div class="palette" id="paletteRed"></div>
+        <div class="palette" id="paletteBlack"></div>
+      </div>
+      <div>
+        <div class="label">轮走方</div>
+        <select id="setupTurn">
+          <option value="w" selected>红方先走</option>
+          <option value="b">黑方先走</option>
+        </select>
+      </div>
+      <div class="row2">
+        <button id="setupClearBtn" type="button">清空</button>
+        <button id="setupInitBtn" type="button">初始局面</button>
+      </div>
+      <div class="err" id="setupErr"></div>
+      <div class="row2">
+        <button id="setupCancelBtn" type="button">取消</button>
+        <button id="setupDoneBtn" class="primary" type="button">生成 FEN</button>
+      </div>
     </div>
     <div>
       <div class="label">着法（WXF 记谱）</div>
@@ -208,6 +279,30 @@
       <div id="engineMsg">NNUE: xiangqi-c07e94a5c7cb（+914 Elo）</div>
     </div>
   </aside>
+</div>
+
+<div class="overlay hidden" id="importOverlay">
+  <div class="card import">
+    <p class="big">导入局面</p>
+    <div>
+      <div class="label">FEN 串（第二段 w＝红方走，b＝黑方走）</div>
+      <textarea id="fenInput" rows="3" spellcheck="false"
+        placeholder="例：rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"></textarea>
+    </div>
+    <div>
+      <div class="label">先行方（FEN 中轮走的一方由谁执）</div>
+      <select id="firstSel">
+        <option value="human" selected>我先行</option>
+        <option value="ai">引擎先行 · AI 解题</option>
+      </select>
+    </div>
+    <div class="err" id="fenErr"></div>
+    <div class="row2">
+      <button id="importCancelBtn" type="button">取消</button>
+      <button id="importOkBtn" class="primary" type="button">导入并开始</button>
+    </div>
+    <button id="resetStdBtn" type="button">恢复标准开局</button>
+  </div>
 </div>
 
 <div class="overlay hidden" id="overlay">
@@ -256,10 +351,13 @@ import Module from "./lib/ffish.js";
   const sf = await Stockfish();
   let onBestmove = null;
   let lastInfo = "";
+  let staleBestmoves = 0; // 弃置的旧搜索数：其 bestmove 到达时按序丢弃
   sf.addMessageListener((line) => {
     if (line.startsWith("info ") && line.includes(" pv ")) lastInfo = line;
     const m = /^bestmove (\S+)/.exec(line);
-    if (m && onBestmove) { const cb = onBestmove; onBestmove = null; cb(m[1]); }
+    if (!m) return;
+    if (staleBestmoves > 0) { staleBestmoves--; return; }
+    if (onBestmove) { const cb = onBestmove; onBestmove = null; cb(m[1]); }
   });
 
   setStatus("正在加载 NNUE 模型…", true);
@@ -285,6 +383,7 @@ import Module from "./lib/ffish.js";
   };
 
   let board = new ffish.Board("xiangqi");
+  let startFen = null;  // 导入的起始局面；null 表示标准开局
   let moves = [];       // UCI 着法
   let sans = [];        // WXF 记谱
   let humanRed = true;  // 人执红？
@@ -293,7 +392,11 @@ import Module from "./lib/ffish.js";
   let targets = [];     // 选中子的合法落点
   let lastMove = null;  // {from, to}
   let gameOver = false;
+  let endTitle = "";    // 终局时的状态标题，摆棋取消后用于恢复
   let thinking = false;
+  let setupMode = false;
+  let setupGrid = {};   // 摆棋模式下的盘面 {sq: letter}
+  let setupSel = "K";   // 调色板当前选中：棋子字母或 "x"（移除）
 
   const humanTurn = () => board.turn() === humanRed;
 
@@ -427,9 +530,9 @@ import Module from "./lib/ffish.js";
 
   function draw() {
     drawBoardBase();
-    const grid = gridFromFen(board.fen());
+    const grid = setupMode ? setupGrid : gridFromFen(board.fen());
 
-    if (lastMove) {
+    if (!setupMode && lastMove) {
       for (const s of [lastMove.from, lastMove.to]) {
         const { f, r } = parseSq(s);
         ctx.strokeStyle = "rgba(192, 57, 43, 0.85)";
@@ -439,7 +542,7 @@ import Module from "./lib/ffish.js";
     }
     for (const [sq, letter] of Object.entries(grid)) drawPiece(sq, letter, 1);
 
-    if (selected) {
+    if (!setupMode && selected) {
       const { f, r } = parseSq(selected);
       ctx.strokeStyle = "#2e7d4f";
       ctx.lineWidth = 3;
@@ -506,6 +609,7 @@ import Module from "./lib/ffish.js";
       title = humanWon ? "你赢了" : "引擎获胜";
       sub = humanWon ? "漂亮！你击败了 NNUE 引擎。" : "再接再厉，试试悔棋复盘或调低难度。";
     }
+    endTitle = title;
     setStatus(title, false);
     overlayTitle.textContent = title;
     overlaySub.textContent = sub;
@@ -524,7 +628,8 @@ import Module from "./lib/ffish.js";
     setStatus("引擎思考中…", true);
     const lv = LEVELS[document.getElementById("level").value];
     sf.postMessage(`setoption name Skill Level value ${lv.skill}`);
-    sf.postMessage("position startpos" + (moves.length ? " moves " + moves.join(" ") : ""));
+    const pos = startFen ? "position fen " + startFen : "position startpos";
+    sf.postMessage(pos + (moves.length ? " moves " + moves.join(" ") : ""));
     onBestmove = (mv) => {
       thinking = false;
       if (gameOver) return;
@@ -543,18 +648,24 @@ import Module from "./lib/ffish.js";
     sf.postMessage(`go movetime ${lv.movetime}`);
   }
 
-  canvas.addEventListener("click", (e) => {
-    if (gameOver || thinking || !humanTurn()) return;
+  function squareFromEvent(e) {
     const rect = canvas.getBoundingClientRect();
     const scale = W / rect.width;
     const mx = (e.clientX - rect.left) * scale;
     const my = (e.clientY - rect.top) * scale;
     let f = Math.round((mx - MX) / GAP), ri = Math.round((my - MY) / GAP);
-    if (f < 0 || f > 8 || ri < 0 || ri > 9) return;
-    if (Math.abs(MX + f * GAP - mx) > GAP * 0.45 || Math.abs(MY + ri * GAP - my) > GAP * 0.45) return;
+    if (f < 0 || f > 8 || ri < 0 || ri > 9) return null;
+    if (Math.abs(MX + f * GAP - mx) > GAP * 0.45 || Math.abs(MY + ri * GAP - my) > GAP * 0.45) return null;
     if (flipped) { f = 8 - f; }
     const r = flipped ? ri + 1 : 10 - ri;
-    const sq = sqName(f, r);
+    return sqName(f, r);
+  }
+
+  canvas.addEventListener("click", (e) => {
+    const sq = squareFromEvent(e);
+    if (!sq) return;
+    if (setupMode) { setupPlace(sq); return; }
+    if (gameOver || thinking || !humanTurn()) return;
 
     if (selected && targets.includes(sq)) {
       pushMove(selected + sq);
@@ -588,22 +699,216 @@ import Module from "./lib/ffish.js";
     draw();
   });
 
-  function restart() {
-    onBestmove = null; // 丢弃思考中的旧回调，避免污染新对局
+  function startGame() {
+    if (thinking) { staleBestmoves++; sf.postMessage("stop"); } // 丢弃进行中的旧搜索
+    onBestmove = null;
     board.delete();
-    board = new ffish.Board("xiangqi");
+    board = startFen ? new ffish.Board("xiangqi", startFen) : new ffish.Board("xiangqi");
     moves = []; sans = [];
     selected = null; targets = []; lastMove = null;
     gameOver = false; thinking = false;
-    humanRed = document.getElementById("side").value === "r";
     flipped = !humanRed;
     overlay.classList.add("hidden");
     undoBtn.disabled = true;
     updateMovelist();
     draw();
+    if (checkGameEnd()) return; // 导入的局面可能本身已是终局
     if (!humanTurn()) engineTurn();
     else statusForHuman();
   }
+
+  function restart() {
+    humanRed = document.getElementById("side").value === "r";
+    startGame();
+  }
+
+  // ---------- 导入局面 ----------
+  const importOverlay = document.getElementById("importOverlay");
+  const fenInput = document.getElementById("fenInput");
+  const fenErr = document.getElementById("fenErr");
+
+  document.getElementById("importBtn").addEventListener("click", () => {
+    fenErr.textContent = "";
+    fenInput.value = board.fen(); // 预填当前局面，便于修改或分享
+    importOverlay.classList.remove("hidden");
+    fenInput.focus();
+    fenInput.select();
+  });
+  // 摆棋期间可能弃置过引擎搜索；回到对局时若轮引擎走且未在思考，则补上
+  function resumeGame() {
+    if (gameOver) { setStatus(endTitle || "对局结束", false); return; }
+    if (!humanTurn()) { if (!thinking) engineTurn(); }
+    else statusForHuman();
+  }
+
+  document.getElementById("importCancelBtn").addEventListener("click", () => {
+    importOverlay.classList.add("hidden");
+    resumeGame();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !importOverlay.classList.contains("hidden")) {
+      importOverlay.classList.add("hidden");
+      resumeGame();
+    }
+  });
+  document.getElementById("resetStdBtn").addEventListener("click", () => {
+    startFen = null;
+    importOverlay.classList.add("hidden");
+    restart();
+  });
+  document.getElementById("importOkBtn").addEventListener("click", () => {
+    const fen = fenInput.value.trim().replace(/\s+/g, " ");
+    if (!fen) { fenErr.textContent = "请粘贴 FEN 串。"; return; }
+    if (ffish.validateFen(fen, "xiangqi") !== 1) {
+      fenErr.textContent = "FEN 无效：请检查棋盘、子力与轮走方字段。";
+      return;
+    }
+    const redToMove = fen.split(" ")[1] !== "b"; // 缺省视为红方走
+    const humanFirst = document.getElementById("firstSel").value === "human";
+    humanRed = humanFirst ? redToMove : !redToMove;
+    document.getElementById("side").value = humanRed ? "r" : "b";
+    startFen = fen;
+    importOverlay.classList.add("hidden");
+    startGame();
+  });
+
+  // ---------- 摆棋模式 ----------
+  const playPanel = document.getElementById("playPanel");
+  const setupPanel = document.getElementById("setupPanel");
+  const setupErrEl = document.getElementById("setupErr");
+  const START_BOARD = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR";
+  const MAXN = { k: 1, a: 2, b: 2, n: 2, r: 2, c: 2, p: 5 };
+
+  // 各兵种的合法站位（中国象棋规则下棋子可能到达的点）
+  const PALACE_R = ["d1","e1","f1","d2","e2","f2","d3","e3","f3"];
+  const PALACE_B = ["d8","e8","f8","d9","e9","f9","d10","e10","f10"];
+  const ADV_R = ["d1","f1","e2","d3","f3"];
+  const ADV_B = ["d10","f10","e9","d8","f8"];
+  const ELE_R = ["c1","g1","a3","e3","i3","c5","g5"];
+  const ELE_B = ["c10","g10","a8","e8","i8","c6","g6"];
+
+  function buildPalette(el, letters) {
+    for (const ch of letters) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      if (ch === "x") { btn.textContent = "移除"; btn.className = "erase"; }
+      else {
+        btn.textContent = CHARS[ch];
+        btn.className = ch === ch.toUpperCase() ? "rd" : "blk";
+      }
+      btn.dataset.piece = ch;
+      btn.addEventListener("click", () => {
+        setupSel = ch;
+        document.querySelectorAll(".palette button").forEach(b =>
+          b.classList.toggle("sel", b.dataset.piece === ch));
+      });
+      el.appendChild(btn);
+    }
+  }
+  buildPalette(document.getElementById("paletteRed"), "KARNCBP");
+  buildPalette(document.getElementById("paletteBlack"), "karncbpx");
+  document.querySelector('.palette button[data-piece="K"]').classList.add("sel");
+
+  function enterSetup() {
+    if (thinking) { staleBestmoves++; sf.postMessage("stop"); onBestmove = null; thinking = false; }
+    setupMode = true;
+    setupGrid = {};  // 从空棋盘开始摆
+    selected = null; targets = [];
+    setupErrEl.textContent = "";
+    playPanel.style.display = "none";
+    setupPanel.style.display = "flex";
+    setStatus("摆棋中", false);
+    draw();
+  }
+
+  function exitSetup(resume) {
+    setupMode = false;
+    playPanel.style.display = "contents";
+    setupPanel.style.display = "none";
+    draw();
+    if (resume) resumeGame();
+  }
+
+  function setupPlace(sq) {
+    setupErrEl.textContent = "";
+    if (setupSel === "x" || setupGrid[sq] === setupSel) { delete setupGrid[sq]; draw(); return; }
+    const cap = MAXN[setupSel.toLowerCase()];
+    const cnt = Object.values(setupGrid).filter(v => v === setupSel).length;
+    if (cnt >= cap) { setupErrEl.textContent = `${CHARS[setupSel]} 最多 ${cap} 枚`; return; }
+    setupGrid[sq] = setupSel;
+    draw();
+  }
+
+  function setupBoardPart() {
+    const rows = [];
+    for (let r = 10; r >= 1; r--) {
+      let row = "", gap = 0;
+      for (let f = 0; f < 9; f++) {
+        const ch = setupGrid[sqName(f, r)];
+        if (ch) { if (gap) { row += gap; gap = 0; } row += ch; }
+        else gap++;
+      }
+      if (gap) row += gap;
+      rows.push(row);
+    }
+    return rows.join("/");
+  }
+
+  function validateSetup(turn) {
+    const at = {};
+    for (const [sq, ch] of Object.entries(setupGrid)) (at[ch] = at[ch] || []).push(sq);
+    const within = (ch, set) => (at[ch] || []).every(s => set.includes(s));
+    if ((at.K || []).length !== 1 || (at.k || []).length !== 1) return "需要红帥与黑將各一枚";
+    if (!within("K", PALACE_R) || !within("k", PALACE_B)) return "将帅必须在各自九宫内";
+    if (!within("A", ADV_R) || !within("a", ADV_B)) return "仕/士只能在九宫斜线交点上";
+    if (!within("B", ELE_R) || !within("b", ELE_B)) return "相/象不能过河，且只能在田字位上";
+    for (const s of at.P || []) {
+      const { f, r } = parseSq(s);
+      if (r < 4 || (r <= 5 && f % 2 !== 0)) return "红兵位置不合法：未过河只能在兵线交点";
+    }
+    for (const s of at.p || []) {
+      const { f, r } = parseSq(s);
+      if (r > 7 || (r >= 6 && f % 2 !== 0)) return "黑卒位置不合法：未过河只能在卒线交点";
+    }
+    const qK = parseSq(at.K[0]), qk = parseSq(at.k[0]);
+    if (qK.f === qk.f) {
+      let blocked = false;
+      for (let r = qK.r + 1; r < qk.r; r++) if (setupGrid[sqName(qK.f, r)]) blocked = true;
+      if (!blocked) return "将帅不可直接对脸";
+    }
+    // 非走子方不得正被将军：换边建盘探测
+    const probe = new ffish.Board("xiangqi",
+      setupBoardPart() + " " + (turn === "w" ? "b" : "w") + " - - 0 1");
+    const oppInCheck = probe.isCheck();
+    probe.delete();
+    if (oppInCheck) return turn === "w"
+      ? "黑方正被将军，不能轮红方走（可改黑先）"
+      : "红方正被将军，不能轮黑方走（可改红先）";
+    return null;
+  }
+
+  document.getElementById("setupBtn").addEventListener("click", enterSetup);
+  document.getElementById("setupCancelBtn").addEventListener("click", () => exitSetup(true));
+  document.getElementById("setupClearBtn").addEventListener("click", () => {
+    setupGrid = {}; setupErrEl.textContent = ""; draw();
+  });
+  document.getElementById("setupInitBtn").addEventListener("click", () => {
+    setupGrid = gridFromFen(START_BOARD); setupErrEl.textContent = ""; draw();
+  });
+  document.getElementById("setupDoneBtn").addEventListener("click", () => {
+    const turn = document.getElementById("setupTurn").value;
+    const err = validateSetup(turn);
+    if (err) { setupErrEl.textContent = err; return; }
+    const fen = setupBoardPart() + " " + turn + " - - 0 1";
+    if (ffish.validateFen(fen, "xiangqi") !== 1) {
+      setupErrEl.textContent = "局面未通过规则库校验";
+      return;
+    }
+    exitSetup(false);
+    fenErr.textContent = "";
+    fenInput.value = fen;
+    importOverlay.classList.remove("hidden");
+  });
 
   document.getElementById("restartBtn").addEventListener("click", restart);
   document.getElementById("againBtn").addEventListener("click", restart);
